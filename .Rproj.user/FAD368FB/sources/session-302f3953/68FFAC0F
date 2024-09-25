@@ -1,0 +1,24 @@
+{
+    "id": "68FFAC0F",
+    "path": "~/GCC.DNAmPipeline/R/plotting_general.R",
+    "project_path": "R/plotting_general.R",
+    "type": "r_source",
+    "hash": "962818440",
+    "contents": "",
+    "dirty": false,
+    "created": 1727286842444.0,
+    "source_on_save": false,
+    "relative_order": 8,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1727286943,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1727286943697,
+    "read_only": false,
+    "read_only_alternatives": []
+}

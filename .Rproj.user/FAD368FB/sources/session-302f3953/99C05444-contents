@@ -1,0 +1,167 @@
+library(R.utils) # Wouldn't be a required import -- would be on Calen to use
+library(ggplot2)
+library(minfi)
+library(dplyr)
+library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
+library(tidyr)
+library(wateRmelon)
+library(patchwork)
+library(mclust)
+library(ChAMP)
+library(Biobase)
+library(quantro)
+library(pcaMethods)
+library(ewastools)
+
+###############################################################################
+#### Section 1 Should be: ####
+#### #### Opening & Importing Files #### ####
+#### #### Standardizing Format #### ####
+#### #### Creating Objects like QC_Results #### ####
+#### #### "Preparing Analysis" #### ####
+###############################################################################
+
+setwd("/Users/williammarella/Desktop/DNAmPreProc")
+
+idat_dir <- "Data/IDAT"
+
+### I think maybe you only do this once, so it could be written that way
+# Get all .gz files
+gz_files <- list.files("Data/IDAT", pattern = "\\.gz$", full.names = TRUE)
+
+# Unzip all files
+sapply(gz_files, gunzip, remove = TRUE)
+
+# Read in the IDAT files
+rgSet <- read.metharray.exp("Data/IDAT")
+rgSet_extended <- read.metharray.exp("Data/IDAT", extended = TRUE)
+###
+
+
+# Initial preprocessing
+mSet <- preprocessRaw(rgSet)
+
+
+# Adding Fake Variables
+# Get the number of samples
+n_samples <- ncol(mSet)
+
+# Create a data frame with fake phenotype data
+fake_pheno_data <- data.frame(
+  Sample = colnames(mSet),
+  Plate = sample(c("Plate1", "Plate2", "Plate3"), n_samples, replace = TRUE),
+  Batch = sample(c("Batch1", "Batch2"), n_samples, replace = TRUE),
+  Array = sample(paste0("Array", 1:8), n_samples, replace = TRUE),
+  Sex = sample(c("M", "F"), n_samples, replace = TRUE),
+  Age = sample(20:80, n_samples, replace = TRUE)
+)
+
+# !! Imported but commented out to avoid doing it twice
+# Add the fake phenotype data to mSet and rgSet
+# pData(mSet) <- cbind(pData(mSet), fake_pheno_data)
+# pData(rgSet) <- cbind(pData(rgSet), fake_pheno_data)
+# Verify the new columns
+head(pData(mSet))
+colnames(pData(mSet))
+
+# Initialize QC_results
+QC_results <- data.frame(
+  Sample = colnames(mSet),
+  stringsAsFactors = FALSE
+)
+
+
+palette <- c("#E51E32FF", "#7E2B8EFF", "#059CCDFF", "#FF782AFF",  "#2CA030FF", "#C7519CFF", "#E2CF04FF" , "#3F64CEFF" )
+
+rawMSet <-preprocessRaw(rgSet)
+# pData(rawMSet) <- cbind(pData(rawMSet), fake_pheno_data)
+sample_identifier_column = "Sample"
+beta_values <- getBeta(mSet)
+
+source("Scripts/Pipeline_Functions.R")
+
+
+###############################################################################
+#### Example Usage ####
+###############################################################################
+
+get_sample_QC_results <- function(idat_dir, rgSet, mSet=NULL, log2intensity_threshold=10.5,
+                                  detP_threshold=0.005, bscon_threshold=80)
+
+
+cm_results_list <- control_metric_QC(idat_dir)
+
+cm_results_passfail <- cm_results_list$`Pass/Fail Results`
+cm_results_differences <- cm_results_list$`Differences from Threshold`
+
+
+controlPC_results <- control_probe_PC(rgSet)
+
+
+# !! Ideally it wouldn't need an empty QC_results dataframe, but I get why I did that
+# !! I think that when I add the thing Calen wants with many QC checks, I will include this as one
+log2_results <- calculate_and_append_log2_intensity_results(QC_results, mSet, threshold=10.5)
+QC_results <- log2_results$QC_results
+log2_meth_results <- log2_results$log2_meth_results
+
+# Unless calculate_and_append_QC_results has been run, this won't work
+log2_intensity_plot <- plot_log2_intensity_results(log2_meth_results, mSet, "Sample", threshold=10.5,  color_by="Array", label_by="Sex")
+
+# Plot beta distributions
+# Works with any of the set objects that have attached phenotype information
+# Works for any given sample_identifier_column in the phenotype data (column name that stores the sample IDs)
+initial_beta_plot <- plot_beta_distribution(mSet, sample_identifier_column, color_by="Array")
+
+# Gets and plots PCA data
+# Works with any of the set objects that have attached phenotype information
+pca_data <- get_PCA_results(rgSet)
+initial_PCA_plot <- plot_PCA(pca_data, mSet, x=1, y=2, color_by ="Plate", label_by="Sex")
+
+
+detP_results <- calculate_and_append_average_detection_p_values(QC_results, rgSet)
+QC_results <- detP_results$QC_results
+detP_df <- detP_results$detP_df
+
+
+detection_P_value_plot <- plot_avg_detection_p_values(detP_df, mSet, sample_identifier_column, color_by=NULL, label_by=NULL)
+
+bscon_results <- test_bscon(QC_results, rgSet, threshold = 80)
+QC_results <- bscon_results$QC_results
+bscon_df <- bscon_results$bscon_df
+
+# It should probably take the phenotype data from the same set, the rgSet
+bscon_results_plot <- plot_bscon(bscon_df, rgSet, sample_identifier_column, color_by="Plate", label_by="Sex", threshold=80)
+
+# It should be able to take any set object, and extract the betas
+sex_cross_check_plot <- plot_sex_cross_check(mSet, sample_identifier_column, palette)
+
+
+# Quantro, funnorm
+phenotype_variables <- c("Batch", "Array", "Plate", "Sex")
+nova_pvals_df <- run_quantro_anovatest_across_variables(mSet, phenotype_variables)
+
+perm_pvals_df <- run_quantro_permtest_across_variables(mSet, phenotype_variables, num_permutations = 100)
+
+grSet <- perform_Funnorm(rgSet, sex_adjustment=TRUE, sex_column="Sex")
+
+
+# Now, you may want to consider plotting the beta distribution, for instance
+print(initial_beta_plot)
+# Compared to
+post_funnorm_beta_plot <- plot_beta_distribution(grSet, sample_identifier_column, color_by="Sex")
+# Funnorm works wonders!
+
+
+grSet_filtered <- perform_probe_filtering(grSet, rgSet, rgSet_extended, "850k")
+
+
+FDR_Results <- get_fdr_results(grSet_filtered)
+fdr_result_plot <- plot_fdr_results(FDR_Results)
+
+
+
+
+
+
+
+

@@ -1,0 +1,11 @@
+Package: GCC.DNAmPipeline 
+Type: Package 
+Title: Geroscience Computational Core Internal DNAm Pre-Processing Pipeline
+Version: 0.1.0 
+Author: Will Marella[aut,cre] 
+Maintainer: Will Marella <wm2530@cumc.columbia.edu> 
+Description: This package pulls from many well-established library to construct helpful functions for taking DNAm pre-processing from start to finish. Created to assist the Geroscience Computational Core in the Columbia University Robert N. Butler Aging Center.
+License: MIT 
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.3.2
