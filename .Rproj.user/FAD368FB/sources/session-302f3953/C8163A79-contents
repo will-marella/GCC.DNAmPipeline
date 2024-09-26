@@ -14,6 +14,8 @@ library(quantro)
 library(pcaMethods)
 library(tibble)
 library(ewastools)
+library(doParallel)
+library(foreach)
 library(GCC.DNAmPipeline)
 
 idat_dir <- "/Users/williammarella/Desktop/DNAmPreProc/Data/IDAT"
@@ -115,12 +117,11 @@ post_filtering_beta_plot <- plot_beta_distribution(grSet_filtered, sample_identi
 
 # Perform BMIQ Normalization
 ###############################################################################
-grSet_filtered_normalized <- probe_type_normalization_BMIQ(grSet_filtered, rgSet, mSet)
+filtered_normalized_betas_2 <- probe_type_normalization_BMIQ(grSet_filtered)
 
-post_BMIQ_beta_plot <- plot_beta_distribution(grSet_filtered_normalized, sample_identifier_column, color_by="Sex")
-    
+pheno <- pData(grSet_filtered)
 
 
-?champ.norm
-
+# Ideally this can take in a beta mateix
+post_BMIQ_beta_plot <- plot_beta_distribution(filtered_normalized_betas_2, sample_identifier_column, pheno_data=pheno, color_by="Batch")
 

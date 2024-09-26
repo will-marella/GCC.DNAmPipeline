@@ -6,15 +6,35 @@
 ###############################################################################
 
 
-plot_beta_distribution <- function(any_set, sample_identifier_column, color_by=NULL, n_sites = 100000) {
+plot_beta_distribution <- function(any_set_or_beta_matrix, sample_identifier_column, color_by=NULL, pheno_data=NULL, n_sites = 100000) {
   
-  # Get beta values and select random sites
-  raw_betas <- getBeta(any_set)
+  # Error checking for input type
+  if (!(is.matrix(any_set_or_beta_matrix) ||
+        inherits(any_set_or_beta_matrix, c("RGChannelSet", "RGChannelSetExtended", "MethylSet", "GenomicRatioSet", "GenomicMethylSet")))) {
+    stop("Input must be a matrix or a recognized set object (RGChannelSet, MethylSet, GenomicRatioSet, GenomicMethylSet).")
+  }
+  
+  if (is.matrix(any_set_or_beta_matrix)){
+    raw_betas <- any_set_or_beta_matrix
+    plot_type <- "Betas"
+  }
+  else{
+    raw_betas <- getBeta(any_set_or_beta_matrix)
+    plot_type <- "Set"
+  }
+  
+  # Select a certain # of sites for plotting feasibility
   selected_sites <- sample(1:nrow(raw_betas), n_sites)
   beta_sample <- raw_betas[selected_sites, ]
   
-  # Get phenotype data
-  pheno_data <- as.data.frame(pData(any_set))
+  if (!is.data.frame(pheno_data)) {
+    pheno_data <- as.data.frame(pheno_data)
+  }
+  
+  # Ensure phenotype data is available for matrix input
+  if (plot_type == "Betas" && is.null(pheno_data)) {
+    stop("Phenotype data must be provided when the input is a matrix.")
+  }
   
   # Check if sample identifiers match
   if (!all(colnames(raw_betas) == rownames(pheno_data))) {

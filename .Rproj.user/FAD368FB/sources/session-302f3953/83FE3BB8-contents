@@ -1,0 +1,98 @@
+library(ewastools)
+library(tidyverse)
+library(readr)
+
+source(here::here("Code", "rgset_processing.R"))
+#########################
+# Load data
+#########################
+
+pheno_data <-readr::read_csv(here::here("Output/Data", "pheno_data_chunk03.csv")) # CHANGE THIS
+chunk_id <-03 # CHANGE THIS
+
+start <-Sys.time()
+meth <- read_idats(pheno_data$Basename, quiet=FALSE) # `quiet=TRUE` supresses the progress bar
+end <-Sys.time()
+end-start
+
+#########################
+# Detection Pvals
+#########################
+
+
+my_detP <-meth %>% detectionP
+pheno_data$average_det_pval <-colMeans(my_detP$detP, na.rm = T)
+
+pheno_data <-pheno_data %>% 
+  mutate(detection_cutoff_value = 0.01, # Usually use 0.005 - here I use 0.01 because many samples will fail. 
+         passed_detection_cutoff = if_else(average_det_pval > detection_cutoff_value, "fail", "pass"))
+
+
+#####
+# plot detection Pvals
+#####
+
+plot_detection_results(pheno_data = pheno_data, 
+                       Barcode = 'barcode', 
+                       chunk_id = chunk_id,
+                       batch_vars = c("passed_detection_cutoff"),
+                       output_dir = here::here("Output/Figures"))
+
+#########################
+# Control metrics
+#########################
+
+ctrls = control_metrics(meth)
+failed = sample_failure(ctrls)
+print(table(failed))
+
+pheno_data$passed_control_metrics <-if_else(failed == "FALSE", "pass", "fail")
+
+#########################
+# Sex mismatches
+#########################
+
+pheno_data <-plot_sex_mismatch_results(meth = meth, 
+                                       pheno_data = pheno_data,
+                                       Barcode = 'barcode', 
+                                       chunk_id = chunk_id, 
+                                       batch_vars = c('passed_control_metrics'), 
+                                       sex_variable = 'sex', 
+                                       sex_level_male = 1, 
+                                       sex_level_female = 2, 
+                                       output_dir = here::here("Output/Figures"))
+
+
+
+
+#########################
+# Look for contamination or genotypes
+#########################
+
+
+beta = meth %>% detectionP %>% mask(0.01) %>% correct_dye_bias %>% dont_normalize
+snps = meth$manifest[probe_type=="rs",index]
+snps = beta[snps,]
+
+genotypes = call_genotypes(snps,learn=FALSE)
+pheno_data$passed_snp_outlier_bl4 = if_else(snp_outliers(genotypes) < 4, 'pass', 'fail')
+
+pheno_data %>% filter(passed_snp_outlier_bl4 == "fail")
+
+pheno_data$donor_id = enumerate_sample_donors(genotypes)
+
+pheno_data %>% group_by(donor_id) %>% mutate(n = n()) %>% filter(n >1) %>% arrange(desc(n)) %>% dplyr::select(n, dbgap_subject_id) %>% ungroup()
+
+plot_repeated_samples(pheno_data = pheno_data, 
+                      subject_id = 'dbgap_subject_id', 
+                      chunk_id = chunk_id, 
+                      output_dir = here::here("Output/Figures"))
+
+
+
+#########################
+# Write
+#########################
+
+write_csv(pheno_data, here::here("Output/Data", paste0("pheno_data_post_QC2_", "chunk", chunk_id, '.csv')))
+

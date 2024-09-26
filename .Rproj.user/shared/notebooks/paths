@@ -1,4 +1,7 @@
 /Users/williammarella/Desktop/DNAmPreProc/LocalTesting-PreProcPipeline.R="D5500FE4"
+/Users/williammarella/Desktop/DNAmPreProc/Scripts/FromCalen/DNAm_key_steps/05_minfi_pipeline.R="CA4D9B2A"
+/Users/williammarella/Desktop/DNAmPreProc/Scripts/FromCalen/DNAm_key_steps/06_ewastools_pipeline.R="1215106A"
+/Users/williammarella/Desktop/DNAmPreProc/Scripts/FromCalen/DNAm_key_steps/rgset_processing.R="7DC247CA"
 /Users/williammarella/Desktop/DNAmPreProc/Scripts/get_control_probe_PC_results.R="A4C8CC45"
 /Users/williammarella/Desktop/DNAmPreProc/Scripts/normalization_and_probe_filtering.R="05088009"
 /Users/williammarella/Desktop/DNAmPreProc/Scripts/plot_quality_control.R="A74AEB9B"

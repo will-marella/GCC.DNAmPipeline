@@ -1,0 +1,316 @@
+rgset_meth_unmeth <-function(RGset, chunk_id, output_dir, batch_vars, Barcode = Barcode){
+  
+  # Pull off pheno data
+  pheno_data <-pData(RGset) %>% as_tibble()
+  
+  # Get raw methylation data
+  rawMSet <-preprocessRaw(RGset)
+  
+  Meth <-getMeth(rawMSet)
+  Unmeth <-getUnmeth(rawMSet)
+  
+  # Get overall intensities for Meth and Unmeth in each sample to find outliers with low overall intensities 
+  pheno_data$MQC <- log2(colMedians(Meth))
+  pheno_data$UQC <- log2(colMedians(Unmeth))
+  pheno_data$passed_signal_quality <- if_else(pheno_data$MQC < 10.5 | pheno_data$UQC < 10.5, 'fail', 'pass')
+  
+  pheno_data <<-pheno_data
+  rawMSet <<-rawMSet
+  
+  # Loop through the specified color variables to generate plots
+  for (var in batch_vars) {
+    create_plot(data = pheno_data, batch_var = var, chunk_id = chunk_id, output_dir = output_dir)
+  }
+}
+  
+
+
+library(ggplot2)
+
+# Sample function to create plots
+create_plot <- function(data, batch_var, output_dir = output_dir, chunk_id) {
+  
+  data[[batch_var]] <- as_factor(data[[batch_var]])
+  
+  # Create the plot
+  p <- ggplot(data, aes(x = MQC, y = UQC, color = .data[[batch_var]])) +
+    geom_point(alpha = 0.7) +  # Change to the appropriate geom for your data
+    labs(title = paste("MQC by UQC by", batch_var, "chunk", chunk_id),
+         x = "Log2 Median Methylated Intensity",
+         y = "Log2 Median Unmethylated Intensity",
+         color = batch_var) +
+    theme_bw()
+  
+  # Construct the plot name
+  plot_name <- paste0("preproc_raw_meth_unmeth_by_", batch_var, "_chunk_", chunk_id, ".png")
+  
+  # Save the plot
+  ggsave(filename = file.path(output_dir, plot_name), plot = p, width = 10, height = 8)
+  
+  return(p)
+}
+
+
+
+generate_beta_distribution_plot <- function(rawMSet, pheno_data, batch_var, barcode_column, chunk_id, output_dir) {
+  
+  # Check beta distributions and sample 10,000 probes
+  raw_betas <- getBeta(rawMSet, offset = 100) %>% na.omit()
+  beta_sample_long <- raw_betas[sample(1:nrow(raw_betas), 10000), ] %>% as_tibble() %>% pivot_longer(cols = everything(), names_to = barcode_column, values_to = 'bvals')
+
+  
+  beta_plot <-left_join(beta_sample_long, pheno_data)
+  beta_plot[[batch_var]] <-as_factor(beta_plot[[batch_var]])
+  
+  # Generate the plot
+  plot <- ggplot(beta_plot, aes(x = bvals, group = !!sym(barcode_column))) +
+    geom_line(aes(color = !!sym(batch_var)), stat = "density", linewidth = 0.8, alpha = 0.4) +
+    theme_bw() +
+    theme(legend.position = "none") +
+    labs(title = paste("Raw Beta Distribution (10k sample) colored by", batch_var, "chunk", chunk_id))
+
+    # Save the plot
+  file_name <- paste0("raw_beta_dist_10ksample_colored_", batch_var, "_chunk_", chunk_id, ".png")
+  ggsave(filename = file_name, plot = plot, path = output_dir)
+  rm(raw_betas);gc()
+}
+
+# # Example usage
+# generate_beta_distribution_plot(
+#   rawMSet = my_rawMSet,
+#   pheno_data = my_pheno_data,
+#   color_var = "Plate",
+#   barcode_column = "Barcode",
+#   chunk_id = "001",
+#   output_dir = "./plots"
+# )
+
+
+
+pca_and_plots <- function(rawMSet, pheno_data, chunk_id, output_dir, batch_vars = c('passed_signal_quality')) {
+  
+  # Get raw beta values
+  raw_betas <- getBeta(rawMSet, offset = 100) %>% na.omit()
+  
+  # Perform PCA
+  beta_sample_t <- t(raw_betas)
+  pca <- prcomp(beta_sample_t)
+  
+  # Bind PCA results with pheno_data
+  pca_results <- as.data.frame(pca$x[, 1:5])
+  colnames(pca_results) <- paste0("PC", 1:5)
+  pheno_data <- bind_cols(pheno_data, pca_results)
+  rm(pca, pca_results);gc()
+  
+  for (var in batch_vars) {
+  # Plot PCA by signal quality
+plot<-  ggplot(pheno_data, aes(x = PC1, y = PC2, label = as_factor(.data[[var]]))) +
+    geom_text(aes(col = as_factor(.data[[var]]))) + 
+    theme_bw() + 
+    theme(legend.position = 'none')
+
+# Save the plot
+file_name <- paste0("preproc_pc1_and_2_by_", var, "_chunk_", chunk_id, ".png")
+ggsave(filename = file_name, plot = plot, path = output_dir, width = 10, height = 8)
+  }
+  pheno_data <<-pheno_data
+  return(pheno_data = pheno_data)
+}
+
+
+check_beadreads <- function(RGset, pheno_data, chunk_id, barcode_column = 'barcode', output_dir, sthresh = 0.05, beadmin = 5) {
+  # Load required libraries
+  library(wateRmelon)
+  # Load functions
+  "%nin%" <- function(x, y) {
+    return( !(x %in% y) )
+  }
+  
+  # Beadreads
+  nbeads <- wateRmelon::beadcount(RGset)
+  
+  # Find SNPs
+  annot <- getAnnotation(RGset)
+  annot_snps <- annot[which(!is.na(annot$Probe_rs) | !is.na(annot$CpG_rs)), ]
+  
+  # Remove SNP probes from bead counts
+  nbeads <- nbeads[rownames(nbeads) %nin% rownames(annot_snps), ]
+  
+  # Visualize average bead counts per probe
+  beadmean <- data.frame(bmean = rowMeans(nbeads, na.rm = TRUE))
+  plot <-ggplot(beadmean, aes(x = bmean)) + 
+    geom_histogram(bins = 50, color = "black", fill = "grey") + 
+    coord_cartesian(xlim = c(0, 25)) + 
+    labs(x = "Probe mean beadcount") + 
+    theme_bw()
+  
+  file_name <- paste0("probe_mean_beadcount", '_chunk_', chunk_id, ".png")
+  ggsave(filename = file_name, plot = plot, path = output_dir, width = 10, height = 8)
+ 
+  # Calculate the percentage of probes with bead counts under 5
+  bead_fail_percent <- (table(nbeads < beadmin) / length(unlist(nbeads))) %>% round(digits = 3)
+  print(bead_fail_percent)
+  
+  # Create a matrix of TRUE/FALSE for probes with bead counts under the minimum threshold
+  too_few_beads <- (nbeads < beadmin)
+  too_few_beads[is.na(too_few_beads)] <- FALSE
+  too_few_beads_means <- as.data.frame(colMeans(too_few_beads))
+  
+  # Check for samples with failed bead counts
+  failed_samples <- sum(too_few_beads_means > sthresh)
+  
+  # Ensure that the barcode column in pheno_data matches the rownames in too_few_beads_means
+  if (!identical(substr(rownames(too_few_beads_means), 2, 20), pheno_data[[barcode_column]])) {
+    stop("Barcode mismatch between pheno_data and too_few_beads_means.")
+  }
+  
+  # Add mean beadcount and passed beadcount status to pheno_data
+  pheno_data$mean_beadcount <- too_few_beads_means$`colMeans(too_few_beads)`
+  pheno_data$passed_beadcount <- if_else(pheno_data$mean_beadcount < sthresh, "pass", "fail")
+  
+  rm(nbeads);gc()
+  # Return the pheno_data with added columns
+  pheno_data <<-pheno_data
+  return(pheno_data)
+}
+
+
+
+# Function to calculate bisulfite conversion efficiency and generate plot
+generate_bisulfite_conversion_plot <- function(RGset, pheno_data, chunk_id, barcode_column, output_dir) {
+  
+  # Calculate bisulfite conversion efficiency
+  conv_eff <- wateRmelon::bscon(RGset)
+  
+  # Add conversion efficiency to pheno_data
+  pheno_data <- bind_cols(pheno_data, 'bisulf_conv_eff' = conv_eff)
+  
+  # Add a column to indicate pass/fail based on conversion efficiency
+  pheno_data <- pheno_data %>% 
+    mutate(passed_bisulf_conv = if_else(bisulf_conv_eff > 80, "pass", "fail"))
+  
+  # Generate the plot
+  plot <- ggplot(pheno_data, aes(x = factor(.data[[barcode_column]]), y = bisulf_conv_eff)) +
+    geom_point() +
+    geom_hline(yintercept = 80, linetype = 'dashed', color = 'red') +
+    annotate(geom = 'text', x = 35, y = 81, label = "80% conversion cutoff", color = 'red') +
+    theme_bw()
+  
+  # Save the plot
+  file_name <- paste0("bisulfite_conversion", '_chunk_', chunk_id, "_", ".png")
+  ggsave(filename = file_name, plot = plot, path = output_dir, width = 10, height = 8)
+  
+  pheno_data <<-pheno_data
+  return(pheno_data)
+  }
+
+# Example usage:
+# generate_bisulfite_conversion_plot(RGset, pheno_data,  'barcode', here::here("Output/Figures"))
+
+
+
+
+
+plot_detection_results <- function(pheno_data, Barcode, batch_vars, output_dir, chunk_id) {
+  
+  # Plot PC1 vs PC2 with signal quality labels
+  plot <- ggplot(pheno_data, aes(x = PC1, y = PC2, label = passed_detection_cutoff)) +
+    geom_text(aes(col = as_factor(passed_detection_cutoff))) + 
+    theme_bw() + 
+    theme(legend.position = 'none') + ggtitle("passed_detection_cutoff")
+  
+  file_name <- paste0("PC1_PC2_passed_signal_quality_or_not", "_chunk_", chunk_id, ".png")
+  ggsave(filename = file_name, plot = plot, path = output_dir, width = 10, height = 8)
+  
+  # Plot mean detection p-values vs Barcode, colored by batch variables
+  for (var in batch_vars) {
+    plot <- ggplot(pheno_data, aes(x = average_det_pval, y = .data[[Barcode]], color = .data[[var]])) +
+      geom_point() +
+      geom_vline(xintercept = 0.005, color = 'red', linetype = 'dashed') +
+      annotate(geom = 'text', x = 0.004, y = 130, label = "P-value 0.005", col = "red") +
+      theme_bw() + theme(legend.position = "none")
+    
+    file_name <- paste0("mean_detectionP_", var, "_chunk_", chunk_id, ".png")
+    ggsave(filename = file_name, plot = plot, path = output_dir, width = 10, height = 8)
+  }
+}
+
+
+
+
+
+plot_sex_mismatch_results <- function(meth = meth, pheno_data, Barcode, batch_vars, sex_variable, sex_level_male, sex_level_female, output_dir, chunk_id) {
+  
+  # Sex mismatches
+  meth_sex <-meth %>% correct_dye_bias
+  sex_check <-check_sex(meth_sex)
+  pheno_data$Xmeth <-sex_check$X
+  pheno_data$Ymeth <-sex_check$Y
+  
+  pheno_data$predicted_sex <-predict_sex(sex_check$X, sex_check$Y)
+  pheno_data$passed_sex_mismatch <-if_else(pheno_data[[sex_variable]] == sex_level_male & pheno_data$predicted_sex == "m" |
+                                             pheno_data[[sex_variable]] == sex_level_female & pheno_data$predicted_sex == "f", "pass", 'fail')
+
+  
+  # Plots of predicted by expected sex.
+  plot <-ggplot(pheno_data, aes(x = Xmeth, y = Ymeth, color = factor(predicted_sex), shape = factor(sex_variable)))+
+    geom_point(alpha = 0.5)+
+    theme_bw()
+  
+  file_name <- paste0("predicted_sex_by_expected_sex", "_chunk_", chunk_id, ".png")
+  ggsave(filename = file_name, plot = plot, path = output_dir, width = 10, height = 8)
+  
+
+  # plots of sex mismatch by different batch effects.
+  for (var in batch_vars) {
+    plot <- ggplot(pheno_data, aes(x = Xmeth, y = Ymeth, color = passed_sex_mismatch, shape = .data[[var]])) +
+      geom_point(alpha = 0.5) +
+      theme_bw() + theme(legend.position = "none")
+    
+    file_name <- paste0("sex_x_y_methylation_and_mismatch_by_", var, "_chunk_", chunk_id, ".png")
+    ggsave(filename = file_name, plot = plot, path = output_dir, width = 10, height = 8)
+  }
+  
+  return(pheno_data)
+}
+
+
+plot_repeated_samples <- function(pheno_data, subject_id, chunk_id, output_dir = ".") {
+  
+  # Step 1: Count the number of samples per donor and per subject
+  donor_counts <- pheno_data %>%
+    group_by(donor_id) %>%
+    summarise(count = n()) %>%
+    ungroup() %>%
+    mutate(type = "Donor")
+  
+  sample_counts <- pheno_data %>%
+    group_by(.data[[subject_id]]) %>%
+    summarise(count = n()) %>%
+    ungroup() %>%
+    mutate(type = "Sample")
+  
+  # Step 2: Combine donor and sample counts
+  combined_counts <- bind_rows(donor_counts, sample_counts) %>%
+    count(type, count, name = "number_of_people")
+  
+  # Step 3: Plot the data side by side for each count
+  plot <- ggplot(combined_counts, aes(x = factor(count), y = number_of_people, fill = type)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.8)) +
+    geom_text(aes(label = number_of_people), 
+              position = position_dodge(width = 0.8), 
+              vjust = -0.5, size = 3.5) +
+    scale_fill_manual(values = c("Donor" = "steelblue", "Sample" = "darkorange")) +
+    theme_minimal() +
+    labs(title = "Distribution of Number of Samples and Donors per Person",
+         x = "Number per Person",
+         y = "Number of People") +
+    theme(legend.position = "top")
+  
+  # Create file name and save the plot
+  file_name <- paste0("sample_donor_distribution_chunk_", chunk_id, ".png")
+  ggsave(filename = file_name, plot = plot, path = output_dir, width = 10, height = 8)
+  
+  # Return the plot object in case you want to view it in R
+  return(plot)
+}

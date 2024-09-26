@@ -90,6 +90,8 @@ run_quantro_permtest_across_variables <- function(mSet, phenotype_variables, num
 #### Run FunNorm ####
 ###############################################################################
 
+?preprocessNoob
+
 perform_Funnorm <- function(rgSet, sex_adjustment=FALSE, sex_column="Sex") {
   
   if (sex_adjustment == TRUE){grSet <- preprocessFunnorm(rgSet, sex = pData(rgSet)$sex_column)}
@@ -219,33 +221,85 @@ perform_probe_filtering <- function(grSet, rgSet, rgSet_extended, array_version)
 #### Probe Type Normalization / BMIQ ####
 ###############################################################################
 
-probe_type_normalization_BMIQ <- function(grSet, rgSet, mSet){
+probe_type_normalization_BMIQ <- function(grSet, do_parallel = FALSE, n_cores = parallel::detectCores() - 1){
+
+  # Pull off betas and remove NAs
+  betas <-getBeta(grSet)
+  betas <-na.omit(betas)
   
-  beta_values <- getBeta(grSet)
-  probe_types <- getProbeType(grSet)
+  # Pull off annotation data for probes present in RGset after removing rows with missing values
+  norm_annot <-getAnnotation(na.omit(grSet))
+  probe_type <-norm_annot[rownames(norm_annot) %in% rownames(betas), "Type"]
   
-  # This can be computationally intensive for large datasets
-  normalized_beta <- champ.norm(beta = beta_values, rgSet=rgSet, mset=mSet, method="BMIQ", arraytype = "EPIC", cores = 1)
+  # Change name so "I" in annotation is "1" and the rest are "2". 
+  probe_type <-if_else(probe_type == "I", '1', '2')
   
+  # Check the number of cores and decide whether to run in parallel or sequentially
+  if ((n_cores > 1) && isTRUE(do_parallel)) {
+    # Set up parallel backend
+    cl <- makeCluster(n_cores)
+    registerDoParallel(cl)
+    
+    # Ensure the cluster is stopped after function execution
+    on.exit({
+      stopCluster(cl)
+      registerDoSEQ()
+    }) 
+    
+    # Parallelize BMIQ normalization for each sample
+    BMIQ_results_list <- foreach(col = colnames(betas), .combine = "cbind", 
+                                 .packages = c("minfi", "wateRmelon")) %dopar% {
+                                   tryCatch({
+                                     result <- BMIQ(as.data.frame(betas[, col]), design.v = probe_type, nfit = 10000, plots=FALSE )$nbeta
+                                     return(result)
+                                   }, error = function(e) {
+                                     message(paste("Error processing sample", col, ":", e$message))
+                                     return(rep(NA, nrow(betas))) # Return NAs if there is an error
+                                   })
+                                 }  
+    
+    filtered_normalized_beta <- as.matrix(BMIQ_results_list)
+    colnames(filtered_normalized_beta) <- colnames(betas)
+    rownames(filtered_normalized_beta) <- rownames(betas)
+    
+    # Stop parallel processing
+    stopCluster(cl)
+    registerDoSEQ()
+  } else {
+    # Run sequentially if only one core is available
+    filtered_normalized_beta <- do.call(cbind, lapply(colnames(betas), function(col) {
+      tryCatch({
+        BMIQ(as.data.frame(betas[, col]), design.v = probe_type, nfit = 10000, plots=FALSE )$nbeta
+      }, error = function(e) {
+        message(paste("Error processing sample", col, ":", e$message))
+        return(rep(NA, nrow(betas))) # Return NAs if there is an error
+      })
+    }))
+    
+    # Assign names to the matrix
+    colnames(filtered_normalized_beta) <- colnames(betas)
+    rownames(filtered_normalized_beta) <- rownames(betas)
+  }
   
-  # Create a new GenomicRatioSet with normalized values
-  grSet_normalized <- grSet
-  assay(grSet_normalized, "Beta") <- normalized_beta
+  filtered_normalized_beta <- as.matrix(filtered_normalized_beta)
   
   # Density plot of pre- and post-normalization distributions
   par(mfrow=c(1,2))
-  densityPlot(beta_values, main="Before BMIQ Normalization")
-  densityPlot(normalized_beta, main="After BMIQ Normalization")
+  densityPlot(betas, main="Before BMIQ Normalization")
+  densityPlot(filtered_normalized_beta, main="After BMIQ Normalization")
   
   # Check the correlation between samples before and after
-  cor_before <- cor(beta_values)
-  cor_after <- cor(normalized_beta)
+  cor_before <- cor(betas)
+  cor_after <- cor(filtered_normalized_beta)
   
   #Visualize the correlation difference
   par(mfrow=c(1,2))
   image(cor_before, main="Correlation Before BMIQ")
   image(cor_after, main="Correlation After BMIQ")
   
-  return(grSet_normalized)
+  return(filtered_normalized_beta)
   
 }
+
+?BMIQ
+

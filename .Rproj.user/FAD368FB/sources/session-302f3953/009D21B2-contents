@@ -1,0 +1,84 @@
+start <-Sys.time()
+# Load packages
+pacman::p_load(wateRmelon, minfi, data.table, svd, tidyverse, reshape2, sjlabelled)
+
+
+# Load functions
+"%nin%" <- function(x, y) {
+  return( !(x %in% y) )
+}
+
+
+source(here::here("Code", "rgset_processing.R"))
+
+
+RGset <- readRDS("~/PC_clocks/CARDIA/Output/Data/CARDIA_RGset_untouched_extended_chunk8_of_8.rds") # Change this
+chunk_id <-'08' # Change this
+print("RGset Loaded")
+print(Sys.time() - start)
+
+# Fix naming
+identical(colnames(RGset), str_remove(pData(RGset)$Basename, "Data/idats/"))
+colnames(RGset) <-pData(RGset)$barcode
+
+# Make Meth unmethylated plots
+rgset_meth_unmeth(RGset = RGset, 
+                  chunk_id = chunk_id, 
+                  batch_vars = c('assay_batch', 'rowcol'), 
+                  Barcode = 'barcode', 
+                  output_dir = here::here("Output/Figures"))
+
+write_csv(pheno_data, here::here("Output/Data", paste0("pheno_data_", "chunk", chunk_id, '.csv')))
+
+print("rgset_methunmeth_done")
+print(Sys.time() - start)
+
+# Generate raw beta distribution
+generate_beta_distribution_plot(rawMSet = rawMSet, 
+                                pheno_data = pheno_data, 
+                                chunk_id = chunk_id,  
+                                batch_var = 'assay_batch', 
+                                barcode_column = 'barcode',  
+                                output_dir = here::here("Output/Figures"))
+print("beta distributions done")
+print(Sys.time() - start)
+
+# Generate PCA plots and save
+pca_and_plots(rawMSet = rawMSet, 
+              pheno_data = pheno_data, 
+              chunk_id = chunk_id, 
+              batch_vars = c('passed_signal_quality'), 
+              output_dir = here::here("Output/Figures"))
+
+
+write_csv(pheno_data, here::here("Output/Data", paste0("pheno_data_", "chunk", chunk_id, '.csv')))
+
+print("pca plots done")
+print(Sys.time() - start)
+
+# Check Beadreads
+check_beadreads(RGset = RGset, 
+                pheno_data = pheno_data, 
+                barcode_column = 'barcode', 
+                chunk_id = chunk_id, 
+                beadmin = 5, 
+                sthresh = 0.05, 
+                output_dir = here::here("Output/Figures"))
+
+write_csv(pheno_data, here::here("Output/Data", paste0("pheno_data_", "chunk", chunk_id, '.csv')))
+
+print("bead reads done")
+print(Sys.time() - start)
+
+# Check Bisulfite conversion efficiency
+generate_bisulfite_conversion_plot(RGset = RGset, 
+                                   pheno_data = pheno_data, 
+                                   chunk_id = chunk_id, 
+                                   barcode_column = 'barcode', 
+                                   output_dir = here::here("Output/Figures"))
+
+write_csv(pheno_data, here::here("Output/Data", paste0("pheno_data_", "chunk", chunk_id, '.csv')))
+
+print("bisulfite conversion done")
+print(Sys.time() - start)
+
