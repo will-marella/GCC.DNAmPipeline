@@ -117,11 +117,11 @@ post_filtering_beta_plot <- plot_beta_distribution(grSet_filtered, sample_identi
 
 # Perform BMIQ Normalization
 ###############################################################################
-filtered_normalized_betas_2 <- probe_type_normalization_BMIQ(grSet_filtered)
+filtered_normalized_betas_3 <- probe_type_normalization_BMIQ(grSet_filtered, do_parallel = TRUE)
 
 pheno <- pData(grSet_filtered)
 
 
-# Ideally this can take in a beta mateix
-post_BMIQ_beta_plot <- plot_beta_distribution(filtered_normalized_betas_2, sample_identifier_column, pheno_data=pheno, color_by="Batch")
+# Ideally this can take in a beta matrix
+post_BMIQ_beta_plot <- plot_beta_distribution(filtered_normalized_betas_3, sample_identifier_column, pheno_data=pheno, color_by="Batch")
 

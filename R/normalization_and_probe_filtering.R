@@ -261,10 +261,7 @@ probe_type_normalization_BMIQ <- function(grSet, do_parallel = FALSE, n_cores = 
     filtered_normalized_beta <- as.matrix(BMIQ_results_list)
     colnames(filtered_normalized_beta) <- colnames(betas)
     rownames(filtered_normalized_beta) <- rownames(betas)
-    
-    # Stop parallel processing
-    stopCluster(cl)
-    registerDoSEQ()
+  
   } else {
     # Run sequentially if only one core is available
     filtered_normalized_beta <- do.call(cbind, lapply(colnames(betas), function(col) {
@@ -300,6 +297,4 @@ probe_type_normalization_BMIQ <- function(grSet, do_parallel = FALSE, n_cores = 
   return(filtered_normalized_beta)
   
 }
-
-?BMIQ
 
